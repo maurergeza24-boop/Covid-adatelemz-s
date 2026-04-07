@@ -1,0 +1,88 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.express as px
+
+# Oldal konfigurációja
+st.set_page_config(page_title="Adatvizualizáció és Simítás", layout="wide")
+
+st.title("📊 Idősoros Adatvizualizációs Eszköz")
+st.markdown("Excel adatok feldolgozása egyedi oszlopszűréssel és adat-interpolációval.")
+
+# --- OLDALSÁV: BEÁLLÍTÁSOK ---
+st.sidebar.header("Beállítások")
+mode = st.sidebar.radio("Adatforrás kiválasztása:", ["Szimulált adatok", "Excel feltöltése"])
+
+# Oszlopok definíciója (Indexek: A=0, R=17, S=18, T=19, U=20)
+column_map = {
+    'R': 'Új elhunytak száma',
+    'S': 'Új gyógyultak száma',
+    'T': 'Kórházi ápoltak száma',
+    'U': 'Lélegeztetőgépen lévők száma'
+}
+cols_to_use = [0, 17, 18, 19, 20] # A, R, S, T, U
+
+def get_data():
+    if mode == "Szimulált adatok":
+        # Szintetikus adatok generálása
+        dates = pd.date_range(start="2023-01-01", periods=100)
+        data = pd.DataFrame({
+            'Dátum': dates,
+            'Új elhunytak száma': np.random.randint(0, 50, 100),
+            'Új gyógyultak száma': np.random.randint(50, 200, 100),
+            'Kórházi ápoltak száma': np.random.randint(500, 3000, 100),
+            'Lélegeztetőgépen lévők száma': np.random.randint(10, 150, 100)
+        })
+        # Mesterséges nullák elhelyezése a teszteléshez
+        data.loc[10, 'Új elhunytak száma'] = 0
+        return data
+    
+    else:
+        uploaded_file = st.sidebar.file_uploader("Töltse fel az Excel fájlt", type=["xlsx"])
+        if uploaded_file:
+            try:
+                # Csak a kért oszlopok beolvasása
+                df = pd.read_excel(uploaded_file, usecols=cols_to_use)
+                # Oszlopok átnevezése (A feltételezés szerint a sorrend: A, R, S, T, U)
+                df.columns = ['Dátum'] + list(column_map.values())
+                df['Dátum'] = pd.to_datetime(df['Dátum'])
+                return df
+            except Exception as e:
+                st.error(f"Hiba a fájl beolvasásakor: {e}")
+                return None
+        return None
+
+df = get_data()
+
+if df is not None:
+    # --- ADATSIMÍTÁS (A kért logika alapján) ---
+    # 1. A 0 értékeket NaN-ra cseréljük (kivéve a Dátumot)
+    cols_to_smooth = list(column_map.values())
+    df[cols_to_smooth] = df[cols_to_smooth].replace(0, np.nan)
+    
+    # 2. Interpoláció (átlagolás az előtte/utána lévő alapján)
+    # limit_direction='both' biztosítja, hogy a széleken is működjön
+    df[cols_to_smooth] = df[cols_to_smooth].interpolate(method='linear', limit_direction='both')
+    
+    # Visszaalakítás egészekké, ha szükséges
+    df[cols_to_smooth] = df[cols_to_smooth].fillna(0).astype(int)
+
+    # --- VIZUALIZÁCIÓ ---
+    st.subheader("Idősoros elemzés")
+    
+    selected_col = st.selectbox("Válassza ki a megjeleníteni kívánt szempontot:", cols_to_smooth)
+
+    # Plotly grafikon készítése
+    fig = px.line(df, x='Dátum', y=selected_col, 
+                  title=f"{selected_col} alakulása az időben",
+                  labels={selected_col: 'Mennyiség', 'Dátum': 'Időpont'},
+                  markers=True)
+    
+    fig.update_layout(hovermode="x unified")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Adatok nyers megjelenítése (opcionális)
+    if st.checkbox("Nyers adatok mutatása"):
+        st.dataframe(df)
+else:
+    st.info("Kérjük, töltsön fel egy fájlt vagy használja a szimulált adatokat a kezdéshez.")
